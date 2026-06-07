@@ -94,22 +94,37 @@ def build_embedding(features: dict) -> dict:
     return {"embedding": embedding, "embedding_mask": mask, "embedding_fields": EMBEDDING_FIELDS}
 
 
-def freqblog_lookup(session: requests.Session, track_name: str, artist: str) -> dict | None:
+def _freqblog_get(session: requests.Session, params: dict) -> requests.Response:
+    r = session.get(f"{FREQBLOG_BASE}/lookup", params=params)
+    if r.status_code == 429:
+        retry_after = int(r.headers.get("Retry-After", 5))
+        print(f"  [rate limited] waiting {retry_after}s...")
+        time.sleep(retry_after)
+        r = session.get(f"{FREQBLOG_BASE}/lookup", params=params)
+    return r
+
+
+def freqblog_lookup(session: requests.Session, track_name: str, artist: str, isrc: str | None = None) -> dict | None:
+    # Try ISRC first — exact catalog match, no name-formatting ambiguity.
+    # 404 on miss (unlike name lookup which returns 202), so fall through to name.
+    if isrc:
+        try:
+            r = _freqblog_get(session, {"isrc": isrc})
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code != 404:
+                print(f"  [FreqBlog ISRC error] {r.status_code}")
+        except Exception as e:
+            print(f"  [FreqBlog ISRC error] {e}")
+
     try:
-        r = session.get(
-            f"{FREQBLOG_BASE}/lookup",
-            params={"track": track_name, "artist": artist},
-        )
-        if r.status_code == 429:
-            retry_after = int(r.headers.get("Retry-After", 5))
-            print(f"  [rate limited] waiting {retry_after}s...")
-            time.sleep(retry_after)
-            r = session.get(
-                f"{FREQBLOG_BASE}/lookup",
-                params={"track": track_name, "artist": artist},
-            )
+        r = _freqblog_get(session, {"track": track_name, "artist": artist})
         r.raise_for_status()
-        return r.json()
+        try:
+            return r.json()
+        except ValueError:
+            # 202 body is empty — ingest queued, retry on next run
+            return {"backfill_status": "queued"}
     except requests.HTTPError as e:
         print(f"  [FreqBlog error] {e}")
         return None
@@ -199,15 +214,20 @@ def main():
         sid = track["spotify_id"]
         cached = existing.get(sid)
 
-        if cached and cached.get("backfill_status") != "queued":
+        if cached and cached.get("backfill_status") != "queued" and cached.get("feature_source") is not None:
             records.append(cached)
             n_skipped += 1
             print(f"[{i}/{len(subset)}] SKIP            {track['name']} — {track['artist']}")
             continue
 
-        reason = "RETRY (queued) " if cached else "NEW            "
+        if not cached:
+            reason = "NEW            "
+        elif cached.get("backfill_status") == "queued":
+            reason = "RETRY (queued) "
+        else:
+            reason = "RETRY (no feat)"
         print(f"[{i}/{len(subset)}] {reason} {track['name']} — {track['artist']}")
-        features = freqblog_lookup(session, track["name"], track["artist"])
+        features = freqblog_lookup(session, track["name"], track["artist"], isrc=track.get("isrc"))
 
         if cached:
             n_retried += 1
