@@ -9,3 +9,8 @@ dependencies:
   - requests
   - ipython
   - ipykernel
+  - pandas
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - pyqt

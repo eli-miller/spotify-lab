@@ -5,6 +5,10 @@ Saves full dataset to tracks.json and tracks.csv.
 
 SUBSET_NUM controls how many tracks to process during development to conserve
 FreqBlog API quota (1,000 requests/month free). Set to None for a full run.
+
+Incremental: tracks.json is the cache. On each run, tracks already in the cache
+with backfill_status=null are skipped. Tracks with backfill_status="queued" are
+retried (FreqBlog is still analyzing them). New tracks are always fetched.
 """
 import csv
 import json
@@ -26,7 +30,7 @@ OUTPUT_CSV = Path(__file__).parent / "tracks.csv"
 
 # Conservative subset for development — set to None for a full run.
 # FreqBlog free tier: 1,000 requests/month. Full playlist is 306 tracks.
-SUBSET_NUM = 10
+SUBSET_NUM = None
 
 FREQBLOG_BASE = "https://api.freqblog.com"
 
@@ -37,6 +41,14 @@ EMBEDDING_FIELDS = [
     "instrumentalness", "liveness", "acousticness", "time_signature",
     "onset_rate", "dynamic_complexity", "tuning_frequency", "average_loudness",
 ]
+
+
+def load_existing(path: Path) -> dict:
+    """Load tracks.json indexed by spotify_id. Returns {} if file absent."""
+    if path.exists():
+        records = json.loads(path.read_text())
+        return {r["spotify_id"]: r for r in records}
+    return {}
 
 
 def fetch_playlist_tracks(sp, playlist_id):
@@ -103,6 +115,60 @@ def freqblog_lookup(session: requests.Session, track_name: str, artist: str) -> 
         return None
 
 
+def enrich_record(track: dict, features: dict | None) -> dict:
+    record = {**track}
+    if features:
+        for field in [
+            "bpm", "bpm_alt", "bpm_confidence",
+            "key", "key_int", "mode", "camelot", "open_key", "key_confidence",
+            "energy", "loudness_db", "danceability", "valence",
+            "speechiness", "instrumentalness", "liveness", "acousticness",
+            "time_signature", "mood", "genre",
+            "mood_vector",
+            "representative_segment_start",
+            "onset_rate", "dynamic_complexity", "tuning_frequency", "average_loudness",
+            "itunes_track_id", "mbid", "feature_source", "backfill_status",
+        ]:
+            record[field] = features.get(field)
+        record.update(build_embedding(features))
+    else:
+        for field in [
+            "bpm", "bpm_alt", "bpm_confidence", "key", "key_int", "mode", "camelot",
+            "open_key", "key_confidence", "energy", "loudness_db", "danceability",
+            "valence", "speechiness", "instrumentalness", "liveness", "acousticness",
+            "time_signature", "mood", "genre", "mood_vector", "representative_segment_start",
+            "onset_rate", "dynamic_complexity", "tuning_frequency", "average_loudness",
+            "itunes_track_id", "mbid", "feature_source", "backfill_status",
+        ]:
+            record[field] = None
+        record["embedding"] = None
+        record["embedding_mask"] = None
+        record["embedding_fields"] = EMBEDDING_FIELDS
+    return record
+
+
+def save(records: list[dict]) -> None:
+    OUTPUT_JSON.write_text(json.dumps(records, indent=2))
+    print(f"Saved JSON → {OUTPUT_JSON}")
+
+    flat_fields = [k for k in records[0] if k not in ("mood_vector", "embedding", "embedding_mask", "embedding_fields")]
+    mv_fields = [f"mood_vector_{a}" for a in ("happy", "sad", "aggressive", "relaxed", "party")]
+    emb_fields = [f"emb_{f}" for f in EMBEDDING_FIELDS]
+    with OUTPUT_CSV.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=flat_fields + mv_fields + emb_fields)
+        writer.writeheader()
+        for r in records:
+            row = {k: r.get(k) for k in flat_fields}
+            mv = r.get("mood_vector") or {}
+            for axis in ("happy", "sad", "aggressive", "relaxed", "party"):
+                row[f"mood_vector_{axis}"] = mv.get(axis)
+            emb = r.get("embedding") or [None] * len(EMBEDDING_FIELDS)
+            for field, val in zip(EMBEDDING_FIELDS, emb):
+                row[f"emb_{field}"] = val
+            writer.writerow(row)
+    print(f"Saved CSV  → {OUTPUT_CSV}")
+
+
 def main():
     load_dotenv()
     api_key = os.environ.get("FREQBLOG_API_KEY")
@@ -116,6 +182,9 @@ def main():
     all_tracks = fetch_playlist_tracks(sp, PLAYLIST_ID)
     print(f"Fetched {len(all_tracks)} tracks total.")
 
+    existing = load_existing(OUTPUT_JSON)
+    print(f"Cache: {len(existing)} tracks already in tracks.json\n")
+
     subset = all_tracks[:SUBSET_NUM] if SUBSET_NUM else all_tracks
     if SUBSET_NUM:
         print(f"SUBSET_NUM={SUBSET_NUM} — processing first {len(subset)} tracks only.\n")
@@ -124,57 +193,38 @@ def main():
     session.headers["X-Api-Key"] = api_key
 
     records = []
-    quota_used = 0
-    for i, track in enumerate(subset, 1):
-        print(f"[{i}/{len(subset)}] {track['name']} — {track['artist']}")
-        features = freqblog_lookup(session, track["name"], track["artist"])
-        quota_used += 1
+    n_new = n_retried = n_skipped = 0
 
-        record = {**track}
-        if features:
-            for field in [
-                "bpm", "bpm_alt", "bpm_confidence",
-                "key", "key_int", "mode", "camelot", "open_key", "key_confidence",
-                "energy", "loudness_db", "danceability", "valence",
-                "speechiness", "instrumentalness", "liveness", "acousticness",
-                "time_signature", "mood", "genre",
-                "mood_vector",
-                "representative_segment_start",
-                "onset_rate", "dynamic_complexity", "tuning_frequency", "average_loudness",
-                "itunes_track_id", "mbid", "feature_source", "backfill_status",
-            ]:
-                record[field] = features.get(field)
-            record.update(build_embedding(features))
-            status = f"mood={features.get('mood')} energy={features.get('energy')} bpm={features.get('bpm')}"
+    for i, track in enumerate(subset, 1):
+        sid = track["spotify_id"]
+        cached = existing.get(sid)
+
+        if cached and cached.get("backfill_status") != "queued":
+            records.append(cached)
+            n_skipped += 1
+            print(f"[{i}/{len(subset)}] SKIP            {track['name']} — {track['artist']}")
+            continue
+
+        reason = "RETRY (queued) " if cached else "NEW            "
+        print(f"[{i}/{len(subset)}] {reason} {track['name']} — {track['artist']}")
+        features = freqblog_lookup(session, track["name"], track["artist"])
+
+        if cached:
+            n_retried += 1
         else:
-            record.update({f: None for f in EMBEDDING_FIELDS})
-            record["embedding"] = None
-            record["embedding_mask"] = None
-            record["embedding_fields"] = EMBEDDING_FIELDS
-            status = "no data"
-        print(f"         {status}")
+            n_new += 1
+
+        record = enrich_record(track, features)
         records.append(record)
 
-    print(f"\nFreqBlog quota used this run: {quota_used} requests")
+        status = f"mood={record.get('mood')} energy={record.get('energy')} bpm={record.get('bpm')} source={record.get('feature_source')} backfill={record.get('backfill_status')}"
+        print(f"         {status}")
 
-    OUTPUT_JSON.write_text(json.dumps(records, indent=2))
-    print(f"Saved JSON → {OUTPUT_JSON}")
+    print(f"\nFreqBlog quota used this run: {n_new + n_retried} requests "
+          f"({n_new} new, {n_retried} retried, {n_skipped} skipped)")
 
     if records:
-        flat_fields = [k for k in records[0] if k not in ("mood_vector", "embedding", "embedding_mask", "embedding_fields")]
-        with OUTPUT_CSV.open("w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=flat_fields + ["mood_vector_happy", "mood_vector_sad", "mood_vector_aggressive", "mood_vector_relaxed", "mood_vector_party"] + [f"emb_{field}" for field in EMBEDDING_FIELDS])
-            writer.writeheader()
-            for r in records:
-                row = {k: r.get(k) for k in flat_fields}
-                mv = r.get("mood_vector") or {}
-                for axis in ["happy", "sad", "aggressive", "relaxed", "party"]:
-                    row[f"mood_vector_{axis}"] = mv.get(axis)
-                emb = r.get("embedding") or [None] * len(EMBEDDING_FIELDS)
-                for field, val in zip(EMBEDDING_FIELDS, emb):
-                    row[f"emb_{field}"] = val
-                writer.writerow(row)
-        print(f"Saved CSV  → {OUTPUT_CSV}")
+        save(records)
 
 
 if __name__ == "__main__":

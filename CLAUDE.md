@@ -76,6 +76,11 @@ Spotify's November 2024 API changes ([blog post](https://developer.spotify.com/b
 - **Quota**: Free tier is 1,000 requests/month. Always use `SUBSET_NUM` during development to avoid burning quota. Log running totals when making bulk calls.
 - **Rate limits**: Handle HTTP 429 with exponential backoff. Do not retry in a tight loop.
 - **Miss handling**: `/lookup` returns a `backfill_status` field. If a track is not in the catalog, the API queues analysis (30s–2min). Do not treat a null-feature response as a hard failure — log it and continue.
+- **Two feature sources with different field coverage** — `feature_source` in the response determines which fields are populated:
+  - `essentia_preview`: has energy, valence, loudness_db, speechiness, liveness, time_signature, bpm_confidence, key_confidence. **Missing**: onset_rate, dynamic_complexity, tuning_frequency, average_loudness, mood_vector.
+  - `acousticbrainz`: has onset_rate, dynamic_complexity, tuning_frequency, average_loudness, mood_vector. **Missing**: energy, valence, loudness_db, speechiness, liveness, time_signature. Cannot be used for energy/valence-based clustering.
+  - `acousticbrainz` records observed only with `backfill_status="queued"` — they are an interim fallback while Essentia analysis runs. After backfill, they become `essentia_preview`.
+- **Incremental runs**: `backfill_status` is the correct skip/retry signal. Skip if `backfill_status` is null (record is final). Retry if `backfill_status="queued"` (Essentia still running). Do not use field presence (e.g. `bpm`) as the completeness check — both sources have bpm but differ on the fields that matter for clustering.
 - **Error handling**: Handle all HTTP error codes per the OpenAPI schema. Surface errors meaningfully; never silently swallow a non-2xx response.
 
 ## Setup
