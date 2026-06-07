@@ -1,0 +1,25 @@
+# Credentials - never commit these
+.env
+*.env
+.spotify_cache
+.cache*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Conda / virtualenvs
+.conda/
+env/
+venv/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

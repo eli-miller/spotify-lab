@@ -1,0 +1,9 @@
+name: spotify-lab
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - spotipy
+  - python-dotenv
+  - requests
