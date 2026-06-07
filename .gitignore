@@ -17,6 +17,10 @@ build/
 env/
 venv/
 
+# Generated dataset outputs — regenerate with fetch_tracks.py
+shazam_cluster/tracks.json
+shazam_cluster/tracks.csv
+
 # macOS
 .DS_Store
 
