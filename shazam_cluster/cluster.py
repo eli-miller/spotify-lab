@@ -176,10 +176,78 @@ plt.tight_layout()
 plt.show()
 
 # %%
+# --- Pairplot: feature space coloured by cluster ---
+import numpy as np
+
+sns.pairplot(
+    feat_clean.assign(cluster=feat_clean["cluster"].astype(str)),
+    vars=FEATURE_COLS,
+    hue="cluster",
+    plot_kws={"alpha": 0.6, "s": 40},
+    diag_kind="kde",
+    corner=True,
+)
+plt.suptitle(f"Feature pairplot by cluster (k={K})", y=1.02)
+plt.tight_layout()
+plt.show()
+
+# %%
+# --- Radar chart: cluster centroid "personality" (standardised scale) ---
+angles = np.linspace(0, 2 * np.pi, len(FEATURE_COLS), endpoint=False).tolist()
+angles += angles[:1]  # close polygon
+
+fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
+palette = sns.color_palette("tab10", K)
+for c in range(K):
+    vals = km.cluster_centers_[c].tolist()
+    vals += vals[:1]
+    ax.plot(angles, vals, color=palette[c], linewidth=2, label=f"Cluster {c}")
+    ax.fill(angles, vals, color=palette[c], alpha=0.12)
+ax.set_xticks(angles[:-1])
+ax.set_xticklabels(FEATURE_COLS, size=9)
+ax.set_title(f"Cluster centroids — standardized features (k={K})", pad=20)
+ax.legend(loc="upper right", bbox_to_anchor=(1.35, 1.1))
+plt.tight_layout()
+plt.show()
+
+# %%
+# --- Silhouette plot: per-track confidence, grouped by cluster ---
+from sklearn.metrics import silhouette_samples
+
+sil_vals = silhouette_samples(X, feat_clean["cluster"])
+fig, ax = plt.subplots(figsize=(8, 5))
+y_lower = 0
+for c in range(K):
+    c_sil = np.sort(sil_vals[feat_clean["cluster"] == c])
+    y_upper = y_lower + len(c_sil)
+    ax.fill_betweenx(
+        np.arange(y_lower, y_upper),
+        0,
+        c_sil,
+        facecolor=palette[c],
+        alpha=0.7,
+        label=f"Cluster {c}",
+    )
+    ax.text(-0.05, y_lower + len(c_sil) / 2, str(c), va="center")
+    y_lower = y_upper + 4
+
+avg = sil_vals.mean()
+ax.axvline(x=avg, color="black", linestyle="--", linewidth=1, label=f"Avg {avg:.3f}")
+ax.set(
+    xlabel="Silhouette coefficient",
+    ylabel="",
+    yticks=[],
+    title=f"Silhouette plot (k={K}) — tracks left of 0 are likely mis-clustered",
+)
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+# %%
 # --- Save model, scaler, and cluster assignments ---
 import joblib
 
-MODEL_DIR = Path(__file__).parent / "model"
+MODEL_DIR = Path(__file__).parent / f"model_k{K}"
 MODEL_DIR.mkdir(exist_ok=True)
 
 joblib.dump(km, MODEL_DIR / "kmeans.joblib")
@@ -221,7 +289,7 @@ for r in json.loads(DATA.read_text()):
     if r["spotify_id"] not in ep_ids:
         state["assignments"][r["spotify_id"]] = "other"
 
-ASSIGNMENTS = Path(__file__).parent / "cluster_assignments.json"
+ASSIGNMENTS = Path(__file__).parent / f"cluster_assignments_k{K}.json"
 ASSIGNMENTS.write_text(json.dumps(state, indent=2))
 print(f"Saved model → {MODEL_DIR}/")
 print(f"Saved assignments → {ASSIGNMENTS} ({len(state['assignments'])} tracks)")

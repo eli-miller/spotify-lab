@@ -20,10 +20,10 @@ venv/
 # Generated dataset outputs — regenerate with fetch_tracks.py
 shazam_cluster/tracks.json
 shazam_cluster/tracks.csv
-shazam_cluster/cluster_assignments.json
+shazam_cluster/cluster_assignments_k*.json
 
 # Trained model artifacts — regenerate by running cluster.py Save cell
-shazam_cluster/model/
+shazam_cluster/model_k*/
 
 # macOS
 .DS_Store

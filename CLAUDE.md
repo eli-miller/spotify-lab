@@ -10,18 +10,17 @@ Personal Spotify API project collection. Developed and tested on macOS, deployed
 Original goal: read Release Radar, filter to full albums, email a weekly digest.
 
 The script skeleton exists in `release_radar/run.py` with auth, filtering, deduplication, and Gmail SMTP email logic. It is blocked at the Spotify API layer, not a code bug.
-7DS6WcZdNiykC0BvWlt0Ul
+
 ### 2. Shazam Cluster (`shazam_cluster/`)
 **Status: In progress.**
 
 Reads the native "My Shazam Tracks" playlist (ID: `7DS6WcZdNiykC0BvWlt0Ul`, owner: user, confirmed native — description is Shazam-injected), enriches each track with FreqBlog audio features, and clusters by vibe/mood for sub-playlist creation.
 
 **Current state:**
-- `shazam_cluster/fetch_tracks.py` — fetches all 306 tracks from Spotify, looks up each via FreqBlog `/lookup`, builds an 18D embedding vector locally (no extra quota), and saves to `tracks.json` + `tracks.csv` (ML-ready, flat columns)
-- 43 fields per record: Spotify metadata (spotify_id, added_at, album, release_date, isrc, explicit) + FreqBlog audio features (bpm, energy, valence, danceability, mood, genre, camelot, mood_vector, etc.) + 18D embedding
-- `SUBSET_NUM = 10` at the top of the script — set to `None` for a full run. Full run costs 306/1,000 monthly FreqBlog requests.
-- Tracks with `backfill_status = "queued"` have partial data; re-running after a few minutes fills them in as FreqBlog analyzes them.
-- **Next step**: clustering logic (vibe/mood-based) + Spotify sub-playlist creation.
+- `fetch_tracks.py` — fetches 306 tracks from Spotify playlist `7DS6WcZdNiykC0BvWlt0Ul`, enriches via FreqBlog `/lookup` (ISRC-first, name fallback), saves `tracks.json` + `tracks.csv`. `SUBSET_NUM = None` for a full run (costs up to 306/1,000 monthly FreqBlog requests). Tracks with `backfill_status="queued"` retry on next run.
+- `cluster.py` — Jupyter-style `# %%` cells. Loads `tracks.json`, filters to `feature_source="essentia_preview"` (~250 tracks), clusters with k-means on 7 features: `energy`, `valence`, `danceability`, `bpm`, `speechiness`, `instrumentalness`, `release_year`. StandardScaler required before fitting. Save cell writes `model_k{K}/` (kmeans + scaler joblib) and `cluster_assignments_k{K}.json`. Current `K = 3`.
+- `create_playlists.py` — reads `cluster_assignments_k{K}.json`, creates/updates Spotify playlists named `"Shazam Cluster {c+1}/{K}"` and `"Shazam Other"`. `populated` flag in state prevents re-seeding on subsequent runs. Set `K` at the top to match `cluster.py`.
+- Artifacts are K-namespaced (`model_k3/`, `cluster_assignments_k3.json`) — changing K creates new artifacts, never overwrites old ones. Old playlists from prior K runs remain in Spotify and must be deleted manually.
 
 ## Spotify API Restrictions (as of June 2026)
 

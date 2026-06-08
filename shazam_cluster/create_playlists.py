@@ -24,14 +24,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from shared.spotify_auth import get_spotify_client
 
 SCOPE = "playlist-modify-public playlist-read-private"
+K = 2  # must match the K used when running cluster.py Save cell
 DATA = Path(__file__).parent / "tracks.json"
-ASSIGNMENTS = Path(__file__).parent / "cluster_assignments.json"
-MODEL_DIR = Path(__file__).parent / "model"
+ASSIGNMENTS = Path(__file__).parent / f"cluster_assignments_k{K}.json"
+MODEL_DIR = Path(__file__).parent / f"model_k{K}"
 
 # Must match cluster.py FEATURE_COLS exactly
 FEATURE_COLS = [
-    "energy", "valence", "danceability", "bpm",
-    "speechiness", "instrumentalness", "release_year",
+    "energy",
+    "valence",
+    "danceability",
+    "bpm",
+    "speechiness",
+    "instrumentalness",
+    "release_year",
 ]
 
 
@@ -50,12 +56,15 @@ def build_feature_row(track: dict) -> list[float] | None:
 
 def chunks(lst, n):
     for i in range(0, len(lst), n):
-        yield lst[i:i + n]
+        yield lst[i : i + n]
 
 
 def ensure_playlist(sp, name: str, description: str) -> str:
     # sp.user_playlist_create() calls deprecated POST /users/{id}/playlists → 403
-    pl = sp._post("me/playlists", payload={"name": name, "public": True, "description": description})
+    pl = sp._post(
+        "me/playlists",
+        payload={"name": name, "public": True, "description": description},
+    )
     print(f"  Created: {name}")
     return pl["id"]
 
@@ -64,16 +73,20 @@ def main():
     load_dotenv(Path(__file__).parent.parent / ".env")
 
     if not ASSIGNMENTS.exists():
-        print("ERROR: cluster_assignments.json not found. Run the Save cell in cluster.py first.")
+        print(
+            "ERROR: cluster_assignments.json not found. Run the Save cell in cluster.py first."
+        )
         sys.exit(1)
     if not (MODEL_DIR / "kmeans.joblib").exists():
         print("ERROR: model/ not found. Run the Save cell in cluster.py first.")
         sys.exit(1)
 
     state = json.loads(ASSIGNMENTS.read_text())
+    assert (
+        state["cluster_meta"]["k"] == K
+    ), f"K mismatch: file has k={state['cluster_meta']['k']}, script has K={K}"
     km = joblib.load(MODEL_DIR / "kmeans.joblib")
     scaler = joblib.load(MODEL_DIR / "scaler.joblib")
-    K = state["cluster_meta"]["k"]
 
     tracks = json.loads(DATA.read_text())
     existing_assignments = state["assignments"]
@@ -91,10 +104,14 @@ def main():
             row = build_feature_row(track)
             if row is None:
                 cluster_key = "other"
-                print(f"  NEW → Other (missing features): {track['name']} — {track['artist']}")
+                print(
+                    f"  NEW → Other (missing features): {track['name']} — {track['artist']}"
+                )
             else:
                 cluster_key = int(km.predict(scaler.transform([row]))[0])
-                print(f"  NEW → Cluster {cluster_key}: {track['name']} — {track['artist']}")
+                print(
+                    f"  NEW → Cluster {cluster_key}: {track['name']} — {track['artist']}"
+                )
         else:
             cluster_key = "other"
             print(f"  NEW → Other: {track['name']} — {track['artist']}")
@@ -120,12 +137,13 @@ def main():
         key = str(c)
         if key not in playlist_ids:
             playlist_ids[key] = ensure_playlist(
-                sp, f"Shazam Cluster {c}", descriptions.get(key, "")
+                sp, f"Shazam Cluster {c+1}/{K}", descriptions.get(key, "")
             )
 
     if "other" not in playlist_ids:
         playlist_ids["other"] = ensure_playlist(
-            sp, "Shazam Other",
+            sp,
+            "Shazam Other",
             "Shazam tracks without sufficient audio features for clustering",
         )
 
