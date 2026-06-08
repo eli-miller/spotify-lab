@@ -54,6 +54,8 @@ Spotify's November 2024 API changes ([blog post](https://developer.spotify.com/b
 - `sp.playlist_items()` silently calls the deprecated `/tracks` endpoint, which now returns 403. Use `sp._get(f"playlists/{playlist_id}/items", limit=100, offset=offset)` directly.
 - The `/items` endpoint response schema differs from `/tracks`: track data lives in `item["item"]`, not `item["track"]`. Filter with `item["item"].get("type") == "track"`.
 - `sp.artists()` (batch) also hits a 403-returning endpoint. Do not use it.
+- `sp.user_playlist_create()` calls deprecated `POST /users/{id}/playlists` → 403. Use `sp._post("me/playlists", payload={...})` directly instead.
+- `sp.playlist_add_items()` calls deprecated `POST /playlists/{id}/tracks` → 403. Use `sp._post(f"playlists/{id}/items", payload={"uris": [...]})` directly instead (`/items` is the current non-deprecated endpoint).
 
 **Relevant community discussion:** [Spotify SDK GitHub issue #159](https://github.com/spotify/spotify-web-api-ts-sdk/issues/159), [State of Spotify Web API Report 2025](https://spotify.leemartin.com/)
 
