@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Quick dataset quality report for tracks.json."""
+
 import json
 from collections import Counter
 from pathlib import Path
@@ -7,9 +8,19 @@ from pathlib import Path
 DATA = Path(__file__).parent / "tracks.json"
 
 KEY_FIELDS = [
-    "bpm", "energy", "valence", "danceability", "acousticness",
-    "instrumentalness", "speechiness", "liveness", "loudness_db",
-    "mood", "genre", "mood_vector", "onset_rate",
+    "bpm",
+    "energy",
+    "valence",
+    "danceability",
+    "acousticness",
+    "instrumentalness",
+    "speechiness",
+    "liveness",
+    "loudness_db",
+    "mood",
+    "genre",
+    "mood_vector",
+    "onset_rate",
 ]
 
 
@@ -43,7 +54,16 @@ def main():
         if not grp:
             continue
         print(f"  source={src} (n={len(grp)}):")
-        for f in ["bpm", "energy", "valence", "danceability", "mood", "genre", "instrumentalness", "acousticness"]:
+        for f in [
+            "bpm",
+            "energy",
+            "valence",
+            "danceability",
+            "mood",
+            "genre",
+            "instrumentalness",
+            "acousticness",
+        ]:
             filled = sum(1 for r in grp if r.get(f) is not None)
             print(f"    {f:<20} {filled/len(grp)*100:5.1f}%")
 

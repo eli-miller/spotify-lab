@@ -10,7 +10,6 @@ plt.ion()  # Enable interactive mode
 import seaborn as sns
 from pathlib import Path
 
-
 pd.set_option("display.max_columns", None)
 pd.set_option("display.max_rows", 40)
 
@@ -96,7 +95,7 @@ sns.pairplot(
     vars=SHARED_COLS,
     hue="feature_source",
     plot_kws={"alpha": 0.7, "s": 60},
-    diag_kind="kde",
+    diag_kind="hist",
     corner=True,
 )
 plt.suptitle(
@@ -271,11 +270,23 @@ def _centroid_description(cluster_idx):
     return f"{' '.join(parts)} · {mood_str} · {n} tracks"
 
 
+ASSIGNMENTS = Path(__file__).parent / f"cluster_assignments_k{K}.json"
+
+# Carry forward playlist_ids from any prior run for this K, best-effort —
+# create_playlists.py re-verifies playlist identity against Spotify by name
+# on every run regardless, but preserving this avoids unnecessary
+# reconciliation churn when just re-clustering with the same K.
+prior_playlist_ids: dict = {}
+if ASSIGNMENTS.exists():
+    prior_playlist_ids = json.loads(ASSIGNMENTS.read_text())["cluster_meta"].get(
+        "playlist_ids", {}
+    )
+
 state = {
     "cluster_meta": {
         "k": K,
         "feature_cols": FEATURE_COLS,
-        "playlist_ids": {},  # populated by create_playlists.py on first run
+        "playlist_ids": prior_playlist_ids,  # populated by create_playlists.py on first run
         "descriptions": {str(c): _centroid_description(c) for c in range(K)},
     },
     "assignments": {},
@@ -289,7 +300,6 @@ for r in json.loads(DATA.read_text()):
     if r["spotify_id"] not in ep_ids:
         state["assignments"][r["spotify_id"]] = "other"
 
-ASSIGNMENTS = Path(__file__).parent / f"cluster_assignments_k{K}.json"
 ASSIGNMENTS.write_text(json.dumps(state, indent=2))
 print(f"Saved model → {MODEL_DIR}/")
 print(f"Saved assignments → {ASSIGNMENTS} ({len(state['assignments'])} tracks)")
