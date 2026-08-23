@@ -43,15 +43,16 @@ def find_release_radar_playlist(sp: spotipy.Spotify) -> str:
 
 def fetch_all_playlist_tracks(sp: spotipy.Spotify, playlist_id: str) -> list[dict]:
     tracks = []
-    results = sp.playlist_items(playlist_id, limit=100)
+    offset = 0
     while True:
+        results = sp._get(f"playlists/{playlist_id}/items", limit=100, offset=offset)
         for item in results["items"]:
-            track = item.get("track")
-            if track and not track.get("is_local"):
+            track = item.get("item")
+            if track and track.get("type") == "track" and not track.get("is_local"):
                 tracks.append(item)
+        offset += len(results["items"])
         if results["next"] is None:
             break
-        results = sp.next(results)
     return tracks
 
 
@@ -77,7 +78,7 @@ def is_within_last_7_days(release_date_obj: date) -> bool:
 def filter_tracks(raw_tracks: list[dict]) -> list[dict]:
     filtered = []
     for item in raw_tracks:
-        album = item["track"].get("album", {})
+        album = item["item"].get("album", {})
         if album.get("album_type") != "album":
             continue
         parsed = parse_release_date(
@@ -92,7 +93,7 @@ def filter_tracks(raw_tracks: list[dict]) -> list[dict]:
 def deduplicate_by_album(filtered_tracks: list[dict]) -> list[dict]:
     seen = {}
     for item in filtered_tracks:
-        album = item["track"]["album"]
+        album = item["item"]["album"]
         album_id = album["id"]
         if album_id not in seen:
             seen[album_id] = album

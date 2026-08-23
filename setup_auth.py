@@ -10,7 +10,7 @@ from spotipy.cache_handler import CacheFileHandler
 from pathlib import Path
 
 CACHE_PATH = Path(__file__).parent / "shared" / ".spotify_cache"
-SCOPE = "playlist-read-private"
+SCOPE = "playlist-read-private user-follow-read"
 
 auth_manager = SpotifyOAuth(
     client_id=os.environ["SPOTIPY_CLIENT_ID"],

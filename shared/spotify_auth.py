@@ -20,4 +20,7 @@ def get_spotify_client(scope: str, cache_path: str | None = None) -> spotipy.Spo
         cache_handler=CacheFileHandler(cache_path=resolved_cache),
         open_browser=False,
     )
-    return spotipy.Spotify(auth_manager=auth_manager)
+    # retries=0 disables urllib3's built-in retry-on-429 behavior, which would
+    # otherwise silently sleep for the full Retry-After duration (up to 24h).
+    # Our own _get_with_retry handles 429s explicitly instead.
+    return spotipy.Spotify(auth_manager=auth_manager, retries=0)
