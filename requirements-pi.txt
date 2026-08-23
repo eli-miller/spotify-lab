@@ -1,0 +1,15 @@
+# Minimal deps for unattended cron scripts on the Pi:
+# shazam_cluster/create_playlists.py, release_radar/run.py, release_radar/new_releases.py
+#
+# Does NOT include pandas/matplotlib/seaborn/pyqt/ipython — those are only
+# needed for interactive dev work (cluster.py, inspect_dataset.py, sandbox.py),
+# which isn't run headless. See environment.yml for the full Mac dev environment.
+#
+# scikit-learn is pinned to match the Mac environment that trains the
+# clustering model — joblib.load() doesn't guarantee cross-version
+# compatibility when unpickling a KMeans/StandardScaler.
+spotipy==2.25.2
+python-dotenv==1.2.2
+joblib==1.5.3
+scikit-learn==1.9.0
+tqdm==4.68.2
