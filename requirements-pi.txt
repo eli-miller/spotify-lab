@@ -8,6 +8,12 @@
 # scikit-learn is pinned to match the Mac environment that trains the
 # clustering model — joblib.load() doesn't guarantee cross-version
 # compatibility when unpickling a KMeans/StandardScaler.
+#
+# The piwheels scikit-learn/numpy build for Raspberry Pi OS links against
+# libopenblas.so.0 as a system library rather than bundling it — without it,
+# `import sklearn` fails with "ImportError: libopenblas.so.0: cannot open
+# shared object file". Install it first:
+#   sudo apt-get install -y libopenblas0
 spotipy==2.25.2
 python-dotenv==1.2.2
 joblib==1.5.3
