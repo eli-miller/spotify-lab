@@ -5,8 +5,12 @@ Incrementally create/update Shazam cluster playlists on Spotify.
 First run: creates K+1 public playlists (Shazam Cluster 0..N + Shazam Other)
            and adds all tracks from cluster_assignments.json.
 
-Subsequent runs: only new tracks (not yet in assignments) are predicted and appended.
-                 Existing playlist contents are never touched, so manual reordering is preserved.
+Subsequent runs: new tracks (not yet in assignments) are predicted, then every
+                 playlist is synced against its live Spotify contents — only
+                 tracks missing from the actual playlist get added. Playlists
+                 are matched/reused by name, so this is safe to re-run even if
+                 local state or a playlist itself was deleted and recreated.
+                 Existing track order/positions are never touched.
 
 Run after:
   1. fetch_tracks.py  — refreshes tracks.json
@@ -178,8 +182,6 @@ def main():
 
     playlist_ids = state["cluster_meta"]["playlist_ids"]
     descriptions = state["cluster_meta"]["descriptions"]
-    # populated: set of cluster keys whose Spotify playlists have been fully seeded
-    populated: set[str] = set(state["cluster_meta"].get("populated", []))
 
     print("\nChecking playlists...")
     existing_names = fetch_user_playlist_names(sp)
@@ -196,58 +198,43 @@ def main():
         "Shazam tracks without sufficient audio features for clustering",
     )
 
-    # --- Build tracks to add ---
-    # Unpopulated playlists (created but not yet seeded) get ALL assigned tracks.
-    # Populated playlists get only tracks newly assigned this run.
-    to_add: dict[str, list[str]] = defaultdict(list)
+    # --- Group all assigned tracks by cluster key ---
+    tracks_by_key: dict[str, list[str]] = defaultdict(list)
+    for sid, cluster_key in existing_assignments.items():
+        tracks_by_key[str(cluster_key)].append(sid)
 
-    unpopulated = {k for k in playlist_ids if k not in populated}
-    if unpopulated:
-        for sid, cluster_key in existing_assignments.items():
-            key = str(cluster_key)
-            if key in unpopulated:
-                to_add[key].append(sid)
+    # --- Sync each playlist against its live Spotify contents ---
+    # No local "populated" flag — a playlist's actual contents are the only
+    # reliable signal for what it's missing. A flag keyed by cluster index
+    # goes stale the moment a playlist is deleted and recreated (the index
+    # gets a fresh, empty playlist, but the old flag would still say "done").
+    print("\nSyncing playlists...")
+    any_added = False
+    for key, sids in tracks_by_key.items():
+        pl_id = playlist_ids[key]
+        label = f"Cluster {key}" if key != "other" else "Other"
 
-    for cluster_key, sids in new_by_cluster.items():
-        key = str(cluster_key)
-        if key not in unpopulated:  # already included above if unpopulated
-            to_add[key].extend(sids)
+        live_ids = fetch_playlist_track_ids(sp, pl_id)
+        new_sids = [sid for sid in sids if sid not in live_ids]
 
-    # --- Add tracks to playlists ---
-    if not to_add:
-        print("All tracks already in playlists. Nothing to add.")
-    else:
-        print("\nAdding tracks to playlists...")
-        for key, sids in to_add.items():
-            pl_id = playlist_ids[key]
-            label = f"Cluster {key}" if key != "other" else "Other"
+        if not new_sids:
+            print(f"  Shazam {label}: up to date ({len(sids)} track(s))")
+            continue
 
-            # Reconcile against Spotify's live contents, not just local
-            # populated/assignments bookkeeping — that state can be stale
-            # (e.g. reset by a cluster.py Save-cell re-run), so re-checking
-            # here is what actually prevents duplicate track entries.
-            live_ids = fetch_playlist_track_ids(sp, pl_id)
-            new_sids = [sid for sid in sids if sid not in live_ids]
-            skipped = len(sids) - len(new_sids)
-            if skipped:
-                print(f"  Shazam {label}: skipping {skipped} track(s) already in playlist")
+        any_added = True
+        uris = [f"spotify:track:{sid}" for sid in new_sids]
+        for batch in chunks(uris, 100):
+            # /tracks is deprecated and 403s in Dev Mode — use /items
+            sp._post(f"playlists/{pl_id}/items", payload={"uris": batch})
+        print(f"  Shazam {label}: added {len(uris)} track(s)")
 
-            if not new_sids:
-                print(f"  Shazam {label}: nothing to add")
-                populated.add(key)
-                continue
-
-            uris = [f"spotify:track:{sid}" for sid in new_sids]
-            for batch in chunks(uris, 100):
-                # /tracks is deprecated and 403s in Dev Mode — use /items
-                sp._post(f"playlists/{pl_id}/items", payload={"uris": batch})
-            print(f"  Shazam {label}: added {len(uris)} track(s)")
-            populated.add(key)
+    if not any_added:
+        print("\nAll tracks already in playlists. Nothing to add.")
 
     # --- Save updated state ---
     state["assignments"] = existing_assignments
     state["cluster_meta"]["playlist_ids"] = playlist_ids
-    state["cluster_meta"]["populated"] = sorted(populated)
+    state["cluster_meta"].pop("populated", None)
     ASSIGNMENTS.write_text(json.dumps(state, indent=2))
     print(f"\nSaved → {ASSIGNMENTS}")
 
