@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -27,6 +28,8 @@ PLAYLIST_ID = "7DS6WcZdNiykC0BvWlt0Ul"
 SCOPE = "playlist-read-private"
 OUTPUT_JSON = Path(__file__).parent / "tracks.json"
 OUTPUT_CSV = Path(__file__).parent / "tracks.csv"
+QUOTA_TRACKER = Path(__file__).parent / "freqblog_quota.json"
+FREQBLOG_MONTHLY_QUOTA = 1000
 
 # Conservative subset for development — set to None for a full run.
 # FreqBlog free tier: 1,000 requests/month. Full playlist is 306 tracks.
@@ -41,6 +44,22 @@ EMBEDDING_FIELDS = [
     "instrumentalness", "liveness", "acousticness", "time_signature",
     "onset_rate", "dynamic_complexity", "tuning_frequency", "average_loudness",
 ]
+
+
+def load_quota_used_this_month() -> int:
+    """Cumulative FreqBlog requests made so far this calendar month."""
+    if not QUOTA_TRACKER.exists():
+        return 0
+    data = json.loads(QUOTA_TRACKER.read_text())
+    current_month = date.today().strftime("%Y-%m")
+    if data.get("month") != current_month:
+        return 0
+    return data.get("requests", 0)
+
+
+def save_quota_used_this_month(total: int) -> None:
+    current_month = date.today().strftime("%Y-%m")
+    QUOTA_TRACKER.write_text(json.dumps({"month": current_month, "requests": total}, indent=2))
 
 
 def load_existing(path: Path) -> dict:
@@ -240,8 +259,16 @@ def main():
         status = f"mood={record.get('mood')} energy={record.get('energy')} bpm={record.get('bpm')} source={record.get('feature_source')} backfill={record.get('backfill_status')}"
         print(f"         {status}")
 
-    print(f"\nFreqBlog quota used this run: {n_new + n_retried} requests "
+    used_this_run = n_new + n_retried
+    quota_before = load_quota_used_this_month()
+    quota_after = quota_before + used_this_run
+    save_quota_used_this_month(quota_after)
+
+    print(f"\nFreqBlog quota used this run: {used_this_run} requests "
           f"({n_new} new, {n_retried} retried, {n_skipped} skipped)")
+    print(f"FreqBlog quota used this month: {quota_after}/{FREQBLOG_MONTHLY_QUOTA}")
+    if quota_after >= FREQBLOG_MONTHLY_QUOTA * 0.9:
+        print(f"  WARNING: approaching monthly FreqBlog quota ({quota_after}/{FREQBLOG_MONTHLY_QUOTA})")
 
     if records:
         save(records)

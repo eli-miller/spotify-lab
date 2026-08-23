@@ -21,6 +21,7 @@ venv/
 shazam_cluster/tracks.json
 shazam_cluster/tracks.csv
 shazam_cluster/cluster_assignments_k*.json
+shazam_cluster/freqblog_quota.json
 
 # Trained model artifacts — regenerate by running cluster.py Save cell
 shazam_cluster/model_k*/

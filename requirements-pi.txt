@@ -1,5 +1,6 @@
 # Minimal deps for unattended cron scripts on the Pi:
-# shazam_cluster/create_playlists.py, release_radar/run.py, release_radar/new_releases.py
+# shazam_cluster/create_playlists.py, shazam_cluster/fetch_tracks.py,
+# release_radar/run.py, release_radar/new_releases.py
 #
 # Does NOT include pandas/matplotlib/seaborn/pyqt/ipython — those are only
 # needed for interactive dev work (cluster.py, inspect_dataset.py, sandbox.py),
@@ -19,3 +20,4 @@ python-dotenv==1.2.2
 joblib==1.5.3
 scikit-learn==1.9.0
 tqdm==4.68.2
+requests==2.34.2
